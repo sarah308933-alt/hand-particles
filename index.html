@@ -1,52 +1,87 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hand Gesture Particle Nebula</title>
+    <meta charset="utf-8">
+    <title>Resilient Particle System</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; text-shadow: 0 0 5px #000; z-index: 100; }
-        #v-container { position: absolute; bottom: 20px; right: 20px; width: 160px; height: 120px; border: 2px solid #333; border-radius: 10px; overflow: hidden; }
-        video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        canvas { display: block; }
-        .hint { font-size: 0.8rem; color: #fff; opacity: 0.7; }
+        body { margin: 0; background: #000; overflow: hidden; color: cyan; font-family: sans-serif; }
+        #overlay { position: absolute; top: 10px; left: 10px; z-index: 10; pointer-events: none; }
+        #webcam { position: absolute; bottom: 10px; right: 10px; width: 150px; border: 1px solid #444; border-radius: 10px; transform: scaleX(-1); }
     </style>
 </head>
 <body>
-
-<div id="ui">
-    <h2 style="margin:0">Particle Alchemist</h2>
-    <div id="status">Status: Waiting for Camera...</div>
-    <div class="hint">🖐️ Open: Repel | 🤏 Pinch: Attract | ✊ Fist: Explode</div>
-</div>
-
-<div id="v-container">
+    <div id="overlay">
+        <h2>Particle Alchemist</h2>
+        <p id="status">Initializing... (Please allow camera)</p>
+    </div>
     <video id="webcam" autoplay playsinline></video>
-</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
 
-<script>
-    const statusEl = document.getElementById('status');
-    const videoElement = document.getElementById('webcam');
+    <script>
+        const video = document.getElementById('webcam');
+        const status = document.getElementById('status');
 
-    // --- THREE.JS SETUP ---
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+        // 1. SETUP THREE.JS IMMEDIATELY (So you see particles even if camera fails)
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
 
-    const PARTICLE_COUNT = 12000;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(PARTICLE_COUNT * 3);
-    const velocities = new Float32Array(PARTICLE_COUNT * 3);
-    const colors = new Float32Array(PARTICLE_COUNT * 3);
+        const count = 5000;
+        const geo = new THREE.BufferGeometry();
+        const pos = new Float32Array(count * 3);
+        for(let i=0; i<count*3; i++) pos[i] = (Math.random() - 0.5) * 10;
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        
+        const mat = new THREE.PointsMaterial({ size: 0.05, color: 0x00ffff, transparent: true, opacity: 0.8 });
+        const points = new THREE.Points(geo, mat);
+        scene.add(points);
+        camera.position.z = 5;
 
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-        const i3 = i * 3;
-        positions[i3] = (Math.random() - 0.5) * 15;
-        positions
+        let hX = 0, hY = 0;
+
+        // 2. SETUP HAND TRACKING
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 1, minDetectionConfidence: 0.5 });
+        hands.onResults(res => {
+            if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                status.innerText = "Tracking: Active";
+                const tip = res.multiHandLandmarks[0][8];
+                hX = (tip.x - 0.5) * -12;
+                hY = (tip.y - 0.5) * -8;
+            } else {
+                status.innerText = "Tracking: Hand not visible";
+            }
+        });
+
+        const cam = new Camera(video, {
+            onFrame: async () => { await hands.send({image: video}); },
+            width: 640, height: 480
+        });
+
+        // Start Camera and catch errors
+        cam.start().catch(err => {
+            status.innerText = "Camera Error: " + err.message;
+            status.style.color = "red";
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const positions = geo.attributes.position.array;
+            for(let i=0; i<count; i++) {
+                const i3 = i * 3;
+                positions[i3] += (hX - positions[i3]) * 0.01;
+                positions[i3+1] += (hY - positions[i3+1]) * 0.01;
+            }
+            geo.attributes.position.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
+
